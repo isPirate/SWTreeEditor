@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SW 元模型结构树编辑器</title>
+  <style>
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0; padding: 20px; max-width: 1000px; color: #222; }
+h1 { font-size: 1.3rem; margin: 0 0 16px; }
+section { background: #f7f7f8; border: 1px solid #e2e2e6; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
+h2 { font-size: 0.95rem; margin: 0 0 8px; color: #555; }
+textarea { width: 100%; font-family: "Consolas", "Cascadia Code", monospace; font-size: 13px; padding: 8px; border: 1px solid #d0d0d6; border-radius: 4px; resize: vertical; }
+button { cursor: pointer; padding: 5px 10px; border: 1px solid #c8c8d0; background: #fff; border-radius: 4px; font-size: 13px; }
+button:hover { background: #eef; }
+#btn-import { background: #2563eb; color: #fff; border-color: #2563eb; }
+#tree-root { background: #fff; border: 1px solid #e2e2e6; border-radius: 4px; padding: 8px; min-height: 60px; overflow-x: auto; }
+.tree-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; white-space: nowrap; }
+.tree-row:hover { background: #eef3fb; }
+.tree-row.has-warning { background: #fff0f0; }
+.tree-row.has-warning:hover { background: #ffe5e5; }
+.tree-row.has-warning .field.partSid { color: #e53e3e; font-weight: 600; }
+.tree-row .field { cursor: text; padding: 2px 4px; border-radius: 3px; font-family: "Consolas", "Cascadia Code", monospace; font-size: 13px; }
+.tree-row .field:hover { background: #fff3bf; }
+.tree-row .field.partSid { color: #2563eb; }
+.tree-row .field.itemSid { color: #888; }
+.tree-row .field.empty-sid { color: #bbb; font-style: italic; }
+.tree-row .btns { opacity: 0.35; flex-shrink: 0; margin-left: auto; }
+.tree-row:hover .btns { opacity: 1; }
+.op-btn { padding: 2px 7px; font-size: 12px; line-height: 1.4; background: transparent; border: none; border-radius: 3px; color: inherit; }
+.op-btn:hover { background: #e2e6ed; }
+.op-btn:disabled { opacity: 0.3; cursor: not-allowed; background: transparent; }
+.children { margin-left: 10px; padding-left: 12px; border-left: 1px solid #e0e0e4; }
+.field-input { font-family: inherit; font-size: 13px; padding: 1px 3px; border: 1px solid #2563eb; border-radius: 3px; }
+.empty { color: #999; font-style: italic; padding: 10px; }
+.empty p { margin: 0 0 10px 0; }
+.empty button { font-style: normal; background: #2563eb; color: #fff; border-color: #2563eb; }
+.import-hint { font-size: 12px; color: #666; margin: 6px 0; line-height: 1.6; }
+.import-hint code { background: #eef; padding: 0 4px; border-radius: 3px; font-family: "Consolas", "Cascadia Code", monospace; color: #2563eb; font-size: 12px; }
+.import-actions { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+.warnings { margin-top: 8px; }
+.warn { color: #b8860b; background: #fff8e1; border-left: 3px solid #f5c518; padding: 4px 8px; font-size: 13px; margin-bottom: 3px; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <h1>SW 元模型结构树编辑器</h1>
+  <section id="import-area">
+    <h2>导入</h2>
+    <textarea id="import-text" rows="6" placeholder="根节点 (类型SID)&#10;├─[PartSID]→ 子节点 (类型SID)&#10;│   └─[PartSID]→ 孙节点"></textarea>
+    <div class="import-hint">格式：根节点写作 <code>名称 (类型SID)</code>；子节点写作 <code>[PartSID]→ 名称 (类型SID)</code>，用 <code>├─└─│</code> 或空格缩进表示层级（类型SID 可省略）。</div>
+    <div class="import-actions">
+      <button id="btn-import">导入</button>
+      <button id="btn-load-example">加载示例</button>
+      <button id="btn-clear">清空</button>
+    </div>
+  </section>
+  <section id="editor-area">
+    <h2>编辑区</h2>
+    <div id="tree-root"></div>
+  </section>
+  <section id="output-area">
+    <h2>规范化输出</h2>
+    <textarea id="output-text" rows="10" readonly></textarea>
+    <button id="btn-copy">复制</button>
+    <button id="btn-download">下载 .txt</button>
+  </section>
+  <script src="core.js"></script>
+  <script>
+// ====== Task 13: state + render ======
+const T = window.SWTree;
+let state = { root: null }; // 当前树
+
+const editorEl = document.getElementById('tree-root');
+const outputEl = document.getElementById('output-text');
+
+let _rendering = false;
+function render() {
+  if (_rendering) return;
+  _rendering = true;
+  try {
+    editorEl.innerHTML = '';
+    if (!state.root) {
+      editorEl.innerHTML = '<div class="empty"><p>还没有内容。可以「导入」已有结构树，或从零开始新建：</p><button id="btn-new-root">新建根节点</button></div>';
+      outputEl.value = '';
+      const warnEl = document.getElementById('warnings');
+      if (warnEl) warnEl.innerHTML = '';
+      _problemSet = new Set();
+      const nrBtn = document.getElementById('btn-new-root');
+      if (nrBtn) nrBtn.addEventListener('click', createRoot);
+      return;
+    }
+    renderNode(state.root, [], editorEl);
+    refreshValidationDisplay();
+  } finally {
+    _rendering = false;
+  }
+}
+
+function renderNode(node, path, parentEl) {
+  const wrap = document.createElement('div');
+  wrap.className = 'node';
+
+  const row = document.createElement('div');
+  row.className = 'tree-row';
+  row.dataset.path = path.join(',');
+
+  // 计算按钮可用性
+  const depth = path.length;
+  const isRoot = depth === 0;
+  const lastIdx = depth > 0 ? path[depth - 1] : -1;
+  const parent = depth > 0 ? T.getParentByPath(state.root, path) : null;
+  const siblingCount = parent ? parent.children.length : 1;
+  const canUp = !isRoot && lastIdx > 0;
+  const canDown = !isRoot && lastIdx < siblingCount - 1;
+  const canIndent = !isRoot && lastIdx > 0;
+  const canOutdent = depth >= 2;
+
+  // 字段区
+  const fields = document.createElement('span');
+  fields.className = 'fields';
+  if (depth > 0) {
+    fields.appendChild(makeField(node, path, 'partSid', '[' + (node.partSid || '') + ']', 'partSid'));
+    fields.appendChild(document.createTextNode('→ '));
+  }
+  fields.appendChild(makeField(node, path, 'name', node.name || '', 'name'));
+  // 始终渲染 itemSid（有值显示 sid，无值显示占位提示）
+  const itemSidText = node.itemSid ? '(' + node.itemSid + ')' : '(类型)';
+  const itemSidCls = node.itemSid ? 'itemSid' : 'empty-sid';
+  fields.appendChild(makeField(node, path, 'itemSid', itemSidText, itemSidCls));
+  row.appendChild(fields);
+
+  // 按钮区（置于行右，hover 时显示，无效按钮自动禁用）
+  const btns = document.createElement('span');
+  btns.className = 'btns';
+  btns.appendChild(btn('↑', () => op(() => T.moveSibling(state.root, path, -1)), '上移', canUp));
+  btns.appendChild(btn('↓', () => op(() => T.moveSibling(state.root, path, 1)), '下移', canDown));
+  btns.appendChild(btn('→', () => op(() => T.indent(state.root, path)), '降级（变子节点）', canIndent));
+  btns.appendChild(btn('←', () => op(() => T.outdent(state.root, path)), '升级（变兄弟）', canOutdent));
+  btns.appendChild(btn('＋', () => op(() => T.addChild(state.root, path)), '添加子节点', true));
+  btns.appendChild(btn('×', () => delNode(path), '删除节点', true));
+  row.appendChild(btns);
+
+  wrap.appendChild(row);
+
+  if (node.children.length > 0) {
+    const kids = document.createElement('div');
+    kids.className = 'children';
+    node.children.forEach((c, i) => renderNode(c, path.concat([i]), kids));
+    wrap.appendChild(kids);
+  }
+
+  parentEl.appendChild(wrap);
+}
+
+function btn(label, onClick, title, enabled = true) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.className = 'op-btn';
+  b.title = title || '';
+  if (!enabled) b.disabled = true;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function makeField(node, path, field, displayText, cls) {
+  const span = document.createElement('span');
+  span.className = 'field ' + cls;
+  span.textContent = displayText;
+  span.title = '点击编辑';
+  span.addEventListener('click', () => editField(path, field, span));
+  return span;
+}
+
+// 统一操作包装：执行 → 持久化 → 重渲染
+function op(fn) {
+  fn();
+  persistAndRender();
+}
+function persistAndRender() {
+  if (state.root) T.saveTree(state.root);
+  render();
+}
+
+// 当前有校验问题的节点路径集合（"a,b,c" 字符串），供行内红色高亮使用
+let _problemSet = new Set();
+// 刷新输出区文本 + 底部校验说明 + 行内红色高亮（不重建树）
+function refreshValidationDisplay() {
+  const warnings = state.root ? T.validateTree(state.root) : [];
+  _problemSet = new Set(warnings.map(w => w.path.join(',')));
+  outputEl.value = state.root ? T.serializeTree(state.root) : '';
+  let wEl = document.getElementById('warnings');
+  if (warnings.length > 0) {
+    if (!wEl) {
+      wEl = document.createElement('div');
+      wEl.id = 'warnings';
+      wEl.className = 'warnings';
+      editorEl.parentNode.insertBefore(wEl, editorEl.nextSibling);
+    }
+    wEl.innerHTML = warnings.map(w =>
+      `<div class="warn">⚠ 路径 [${w.path.join(',')}] ${w.message}</div>`
+    ).join('');
+  } else if (wEl) {
+    wEl.innerHTML = '';
+  }
+  editorEl.querySelectorAll('.tree-row').forEach(r => {
+    r.classList.toggle('has-warning', _problemSet.has(r.dataset.path || ''));
+  });
+}
+
+// ====== Task 14: 字段编辑 + 删除 ======
+function editField(path, field, span) {
+  const node = T.getNodeByPath(state.root, path);
+  if (!node) return;
+  if (field === 'partSid' && path.length === 0) return;
+  const current = node[field] != null ? String(node[field]) : '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = current;
+  input.className = 'field-input';
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  // 字段显示文案/样式（与 renderNode 保持一致）
+  const dispOf = (f) => {
+    if (f === 'partSid') return { text: '[' + (node.partSid || '') + ']', cls: 'partSid' };
+    if (f === 'name') return { text: node.name || '', cls: 'name' };
+    return node.itemSid ? { text: '(' + node.itemSid + ')', cls: 'itemSid' } : { text: '(类型)', cls: 'empty-sid' };
+  };
+  // 外科手术式关闭：只把 input 换回 span + 刷新输出/校验。不调 render()，
+  // 避免编辑收尾时整树 DOM 重建导致的焦点丢失/点击丢失（偶发"输入框变蓝打不开"根因）
+  const close = (doCommit) => {
+    if (done) return;
+    done = true;
+    if (doCommit) {
+      let val = input.value.trim();
+      if (!(field === 'name' && val === '')) {   // 空名称：不更新，回退原值
+        if (field === 'itemSid' && val === '') val = null;
+        T.updateField(state.root, path, field, val);
+        T.saveTree(state.root);
+      }
+    }
+    const d = dispOf(field);
+    input.replaceWith(makeField(node, path, field, d.text, d.cls));
+    refreshValidationDisplay();
+  };
+  input.addEventListener('blur', () => close(true));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); close(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(false); }
+  });
+}
+
+function delNode(path) {
+  if (path.length === 0) {
+    if (!confirm('删除根节点将清空整棵树，确定？')) return;
+    state.root = null;
+    T.clearTree();
+    document.getElementById('import-text').value = '';
+    render();
+    return;
+  }
+  T.removeNode(state.root, path);
+  persistAndRender();
+}
+
+// ====== Task 15: 导入 / 清空 ======
+document.getElementById('btn-import').addEventListener('click', () => {
+  const text = document.getElementById('import-text').value;
+  if (!text.trim()) { alert('请先粘贴文本'); return; }
+  if (state.root && !confirm('导入将覆盖当前树，确定？')) return;
+  const { root, errors } = T.parseTree(text);
+  if (!root) {
+    alert('解析失败：没有识别到任何有效节点，当前树未变更。');
+    console.warn('parse errors:', errors);
+    return;
+  }
+  state.root = root;
+  persistAndRender();
+  if (errors.length > 0) {
+    alert('解析完成，但有 ' + errors.length + ' 行无法识别（已在控制台列出）');
+    console.warn('parse errors:', errors);
+  }
+});
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (!confirm('清空当前树？')) return;
+  state.root = null;
+  T.clearTree();
+  document.getElementById('import-text').value = '';
+  render();
+});
+
+// 从零新建根节点
+function createRoot() {
+  state.root = T.makeNode({ name: '根节点', itemSid: null });
+  state.root.partSid = null;
+  T.saveTree(state.root);
+  render();
+}
+
+// 示例结构树（供"加载示例"使用）
+const EXAMPLE_TREE = [
+  'Mapping Tree (IMT01)',
+  '├─[PPT01]→ Polarion Tree (IPT02)',
+  '│   ├─[PSP06]→ Space (ISA03)',
+  '│   │   ├─[PSP05]→ Space (ISA03)',
+  '│   │   │   └─[PPD02]→ Doc (IPD02)',
+  '│   │   │       └─[PPW01]→ Requirement',
+].join('\n');
+
+document.getElementById('btn-load-example').addEventListener('click', () => {
+  document.getElementById('import-text').value = EXAMPLE_TREE;
+  document.getElementById('import-text').focus();
+});
+
+// ====== Task 16: 复制 / 下载 ======
+document.getElementById('btn-copy').addEventListener('click', async () => {
+  const text = outputEl.value;
+  if (!text) { alert('输出为空'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    flashBtn('btn-copy', '已复制');
+  } catch (e) {
+    // 降级：选中文本框
+    outputEl.select();
+    const ok = document.execCommand('copy');
+    flashBtn('btn-copy', ok ? '已复制（降级）' : '复制失败');
+  }
+});
+
+document.getElementById('btn-download').addEventListener('click', () => {
+  const text = outputEl.value;
+  if (!text) { alert('输出为空'); return; }
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'meta-model-tree.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+function flashBtn(id, msg) {
+  const b = document.getElementById(id);
+  const old = b.textContent;
+  b.textContent = msg;
+  setTimeout(() => { b.textContent = old; }, 1200);
+}
+
+// ====== Task 17: 启动加载 ======
+(function init() {
+  const saved = T.loadTree();
+  if (saved) state.root = saved;
+  render();
+})();
+  </script>
+</body>
+</html>

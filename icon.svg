@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- App background: rounded square for visibility on any desktop color -->
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#2563eb"/>
+
+  <!-- Tree hierarchy icon: root node + stem + two child nodes -->
+  <!-- The entire tree is one unified white silhouette on blue -->
+  <g fill="#fff">
+    <!-- Root node (top level, widest, represents the tree's parent) -->
+    <rect x="48" y="62" width="160" height="48" rx="16"/>
+
+    <!-- Vertical connector from root down to branch junction -->
+    <rect x="118" y="110" width="20" height="20"/>
+
+    <!-- Horizontal branch junction spanning both children -->
+    <rect x="48" y="130" width="160" height="16" rx="6"/>
+
+    <!-- Left child node -->
+    <rect x="48" y="146" width="68" height="48" rx="14"/>
+
+    <!-- Right child node -->
+    <rect x="140" y="146" width="68" height="48" rx="14"/>
+  </g>
+</svg>

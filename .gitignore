@@ -1,0 +1,14 @@
+# 构建产物（由 install.ps1 / build-icon.ps1 生成）
+dist/
+app.ico
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 编辑器 / IDE
+.vscode/
+.idea/
+
+# 日志
+*.log
