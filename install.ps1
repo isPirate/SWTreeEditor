@@ -47,7 +47,10 @@ Write-Output "[3/4] 使用浏览器: $browserName"
 # ---- 4. 创建桌面快捷方式（--app 应用窗口模式：独立窗口、无地址栏/标签页）----
 $fileUrl = 'file:///' + ($appFile -replace '\\', '/')
 $desktop = [Environment]::GetFolderPath('Desktop')
-$lnkPath = Join-Path $desktop 'SW 元模型结构树编辑器.lnk'
+# 清理旧版快捷方式名（曾叫 "SW 元模型结构树编辑器"）
+$legacyLnk = Join-Path $desktop 'SW 元模型结构树编辑器.lnk'
+if (Test-Path $legacyLnk) { Remove-Item $legacyLnk -Force }
+$lnkPath = Join-Path $desktop 'SWTreeEditor.lnk'
 $ws = New-Object -ComObject WScript.Shell
 $sc = $ws.CreateShortcut($lnkPath)
 $sc.TargetPath = $browser
@@ -59,5 +62,5 @@ $sc.Save()
 Write-Output "[4/4] 已创建桌面快捷方式: $lnkPath"
 
 Write-Output ""
-Write-Output "完成。双击桌面「SW 元模型结构树编辑器」即可在独立窗口中打开使用。"
+Write-Output "完成。双击桌面「SWTreeEditor」即可在独立窗口中打开使用。"
 Write-Output "（改了代码后，重跑本脚本即可刷新已安装的副本与快捷方式）"
